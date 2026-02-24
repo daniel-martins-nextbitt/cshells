@@ -12,8 +12,13 @@ public static class ShellFeatureContextExtensions
     public static T GetOrAdd<T>(this ShellFeatureContext context, object key, Func<T> factory)
     {
         if (context.Properties.TryGetValue(key, out var existing))
-            return (T)existing;
+        {
+            if (existing is T typed)
+                return typed;
 
+            throw new InvalidOperationException(
+                $"Property bag entry for key '{key}' is of type '{existing?.GetType().FullName}', not '{typeof(T).FullName}'.");
+        }
         var value = factory();
         context.Properties[key] = value!;
         return value;
