@@ -54,13 +54,17 @@ public static class ApplicationBuilderExtensions
                 "Ensure app.UseRouting() is called before app.MapCShells().");
 
         // Step 3: Capture the endpoint route builder in the accessor so notification handlers can use it
-        var accessor = endpoints.ServiceProvider.GetRequiredService<EndpointRouteBuilderAccessor>();
-        accessor.EndpointRouteBuilder = endpoints;
+        var endpointAccessor = endpoints.ServiceProvider.GetRequiredService<EndpointRouteBuilderAccessor>();
+        endpointAccessor.EndpointRouteBuilder = endpoints;
 
-        // Step 4: Get the dynamic endpoint data source
+        // Step 4: Capture the application builder in the accessor so notification handlers can register middleware
+        var appBuilderAccessor = endpoints.ServiceProvider.GetRequiredService<ApplicationBuilderAccessor>();
+        appBuilderAccessor.ApplicationBuilder = app;
+
+        // Step 5: Get the dynamic endpoint data source
         var endpointDataSource = endpoints.ServiceProvider.GetRequiredService<DynamicShellEndpointDataSource>();
 
-        // Step 5: Add the data source to the endpoint route builder
+        // Step 6: Add the data source to the endpoint route builder
         // This makes all shell endpoints available to the routing system
         endpoints.DataSources.Add(endpointDataSource);
 

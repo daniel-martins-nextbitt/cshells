@@ -1,8 +1,11 @@
 using CShells.AspNetCore.Features;
+using CShells.AspNetCore.Features;
+using CShells.AspNetCore.Features;
 using CShells.AspNetCore.Routing;
 using CShells.Features;
 using CShells.Hosting;
 using CShells.Notifications;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -12,7 +15,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace CShells.AspNetCore.Notifications;
 
 /// <summary>
-/// Handles shell lifecycle notifications by registering/removing endpoints in the dynamic endpoint data source.
+/// Handles shell lifecycle notifications by registering/removing endpoints and middleware in the dynamic endpoint data source.
 /// </summary>
 public class ShellEndpointRegistrationHandler :
     INotificationHandler<ShellAdded>,
@@ -21,6 +24,7 @@ public class ShellEndpointRegistrationHandler :
 {
     private readonly DynamicShellEndpointDataSource _endpointDataSource;
     private readonly EndpointRouteBuilderAccessor _endpointRouteBuilderAccessor;
+    private readonly ApplicationBuilderAccessor _applicationBuilderAccessor;
     private readonly IShellFeatureFactory _featureFactory;
     private readonly IShellHost _shellHost;
     private readonly IHostEnvironment? _environment;
@@ -34,11 +38,13 @@ public class ShellEndpointRegistrationHandler :
         IShellFeatureFactory featureFactory,
         IShellHost shellHost,
         EndpointRouteBuilderAccessor endpointRouteBuilderAccessor,
+        ApplicationBuilderAccessor applicationBuilderAccessor,
         IHostEnvironment? environment = null,
         ILogger<ShellEndpointRegistrationHandler>? logger = null)
     {
         _endpointDataSource = endpointDataSource;
         _endpointRouteBuilderAccessor = endpointRouteBuilderAccessor;
+        _applicationBuilderAccessor = applicationBuilderAccessor;
         _featureFactory = featureFactory;
         _shellHost = shellHost;
         _environment = environment;
@@ -134,6 +140,9 @@ public class ShellEndpointRegistrationHandler :
         var allFeatureDescriptors = shellContext.ServiceProvider.GetRequiredService<IEnumerable<ShellFeatureDescriptor>>().ToList();
         var featureContext = new ShellFeatureContext(settings, allFeatureDescriptors.AsReadOnly());
 
+        // Register middleware for shell features that implement IMiddlewareShellFeature
+        RegisterShellMiddleware(settings, shellContext, allFeatureDescriptors, featureContext, shellPathPrefix);
+
         // Discover web features using the already-retrieved data
         var webFeatures = DiscoverWebFeatures(shellContext, allFeatureDescriptors);
 
@@ -193,6 +202,78 @@ public class ShellEndpointRegistrationHandler :
                         typeof(IWebShellFeature).IsAssignableFrom(d.StartupType) &&
                         enabledFeatures.Contains(d.Id, StringComparer.OrdinalIgnoreCase))
             .Select(d => (d.Id, d.StartupType!));
+    }
+
+    /// <summary>
+    /// Discovers middleware features that are enabled for a shell, including resolved dependencies.
+    /// </summary>
+    private static IEnumerable<(string FeatureId, Type FeatureType)> DiscoverMiddlewareFeatures(
+        ShellContext shellContext,
+        IEnumerable<ShellFeatureDescriptor> allFeatureDescriptors)
+    {
+        var enabledFeatures = shellContext.EnabledFeatures;
+
+        return allFeatureDescriptors
+            .Where(d => d.StartupType != null &&
+                        typeof(IMiddlewareShellFeature).IsAssignableFrom(d.StartupType) &&
+                        enabledFeatures.Contains(d.Id, StringComparer.OrdinalIgnoreCase))
+            .Select(d => (d.Id, d.StartupType!));
+    }
+
+    /// <summary>
+    /// Registers middleware components for shell features that implement <see cref="IMiddlewareShellFeature"/>.
+    /// </summary>
+    private void RegisterShellMiddleware(
+        ShellSettings settings,
+        ShellContext shellContext,
+        IReadOnlyCollection<ShellFeatureDescriptor> allFeatureDescriptors,
+        ShellFeatureContext featureContext,
+        string? shellPathPrefix)
+    {
+        var appBuilder = _applicationBuilderAccessor.ApplicationBuilder;
+        if (appBuilder == null)
+        {
+            _logger.LogDebug("IApplicationBuilder not available, skipping middleware registration for shell '{ShellId}'", settings.Id);
+            return;
+        }
+
+        var middlewareFeatures = DiscoverMiddlewareFeatures(shellContext, allFeatureDescriptors).ToList();
+        if (middlewareFeatures.Count == 0)
+            return;
+
+        _logger.LogInformation("Registering middleware for {Count} feature(s) in shell '{ShellId}'",
+            middlewareFeatures.Count, settings.Id);
+
+        foreach (var (featureId, featureType) in middlewareFeatures)
+        {
+            try
+            {
+                var feature = _featureFactory.CreateFeature<IMiddlewareShellFeature>(featureType, settings, featureContext);
+
+                if (!string.IsNullOrEmpty(shellPathPrefix))
+                {
+                    // Scope the middleware to the shell's path prefix using Map()
+                    appBuilder.Map(shellPathPrefix, branch =>
+                    {
+                        feature.UseMiddleware(branch, _environment);
+                    });
+                }
+                else
+                {
+                    // No path prefix — register middleware at the root level
+                    feature.UseMiddleware(appBuilder, _environment);
+                }
+
+                _logger.LogDebug("Registered middleware for feature '{FeatureId}' in shell '{ShellId}'",
+                    featureId, settings.Id);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to register middleware for feature '{FeatureId}' in shell '{ShellId}'",
+                    featureId, settings.Id);
+                throw;
+            }
+        }
     }
 
     /// <summary>
