@@ -1,6 +1,5 @@
 using CShells.Configuration;
 using CShells.Hosting;
-using CShells.Tests.Integration.ShellHost;
 using CShells.Tests.TestHelpers;
 
 namespace CShells.Tests.Integration.DefaultShellHost;

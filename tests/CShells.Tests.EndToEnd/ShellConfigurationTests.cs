@@ -1,4 +1,3 @@
-using CShells.AspNetCore;
 using CShells.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 

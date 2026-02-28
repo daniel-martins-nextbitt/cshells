@@ -1,6 +1,4 @@
 using CShells.AspNetCore.Features;
-using CShells.AspNetCore.Features;
-using CShells.AspNetCore.Features;
 using CShells.AspNetCore.Routing;
 using CShells.Features;
 using CShells.Hosting;
