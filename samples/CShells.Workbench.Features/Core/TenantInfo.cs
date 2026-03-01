@@ -1,11 +1,10 @@
 namespace CShells.Workbench.Features.Core;
-
 /// <summary>
-/// Default implementation of tenant information.
+/// Default implementation of <see cref="ITenantInfo"/>.
 /// </summary>
 public class TenantInfo : ITenantInfo
 {
-    public required string TenantId { get; init; }
-    public required string TenantName { get; init; }
-    public required string Tier { get; init; }
+    public string TenantId { get; init; } = "";
+    public string TenantName { get; init; } = "";
+    public string Plan { get; init; } = "Free";
 }

@@ -2,12 +2,12 @@
   "name": "Default",
   "features": [
     "Core",
-    "StripePayment",
-    "EmailNotification"
+    "Posts"
   ],
   "configuration": {
     "WebRouting": {
       "Path": ""
-    }
+    },
+    "Plan": "Free"
   }
 }

@@ -3,65 +3,38 @@ using CShells.Features;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Options;
-
 namespace CShells.Workbench.Features.Core;
-
 /// <summary>
-/// Core feature that registers fundamental services and exposes tenant information endpoint.
+/// Core feature — always required.
+/// Registers tenant identity and exposes a GET / info endpoint.
 /// </summary>
-[ShellFeature("Core", DisplayName = "Core Services")]
+[ShellFeature("Core", DisplayName = "Core", Description = "Core tenant services")]
 public class CoreFeature(ShellSettings shellSettings) : IWebShellFeature
 {
     public void ConfigureServices(IServiceCollection services)
     {
-        // Bind shell-scoped configuration to CoreOptions
-        // The IConfiguration is resolved from the service provider (which will be the shell-scoped one)
-        services.AddOptions<CoreOptions>()
-            .Configure<IConfiguration>((options, config) =>
-            {
-                config.Bind(options);
-            });
-
-        services.AddSingleton<IAuditLogger, AuditLogger>();
-        services.AddSingleton<ITimeService, TimeService>();
-
-        // Create TenantInfo from shell-scoped options
-        services.AddSingleton<ITenantInfo>(sp =>
+        services.AddSingleton<ITenantInfo>(new TenantInfo
         {
-            var options = sp.GetRequiredService<IOptions<CoreOptions>>().Value;
-            return new TenantInfo
-            {
-                TenantId = shellSettings.Id.ToString(),
-                TenantName = shellSettings.Id.ToString(),
-                Tier = options.Tier ?? "Standard"
-            };
+            TenantId   = shellSettings.Id.ToString(),
+            TenantName = shellSettings.Id.ToString(),
+            Plan       = shellSettings.ConfigurationData.TryGetValue("Plan", out var plan)
+                             ? plan?.ToString() ?? "Free"
+                             : "Free"
         });
     }
-
     public void MapEndpoints(IEndpointRouteBuilder endpoints, IHostEnvironment? environment)
     {
-        // Expose root endpoint that shows tenant information and configuration
-        endpoints.MapGet("", async (HttpContext context) =>
+        endpoints.MapGet("", (HttpContext ctx) =>
         {
-            var tenantInfo = context.RequestServices.GetRequiredService<ITenantInfo>();
-            var options = context.RequestServices.GetRequiredService<IOptions<CoreOptions>>().Value;
-
-            return Results.Json(new
+            var tenant = ctx.RequestServices.GetRequiredService<ITenantInfo>();
+            return Results.Ok(new
             {
-                Tenant = tenantInfo.TenantName,
-                TenantId = tenantInfo.TenantId,
-                Tier = tenantInfo.Tier,
-                Message = "Welcome to the Payment Processing Platform",
-                Configuration = new
-                {
-                    options.Theme,
-                    options.MaxUploadSizeMB,
-                    options.ConnectionStringKey
-                }
+                tenant   = tenant.TenantName,
+                tenantId = tenant.TenantId,
+                plan     = tenant.Plan,
+                features = shellSettings.EnabledFeatures
             });
         });
     }

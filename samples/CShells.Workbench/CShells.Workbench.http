@@ -1,15 +1,55 @@
-GET {{SampleApp_HostAddress}}/weatherforecast/
+GET {{SampleApp_HostAddress}}/
 Accept: application/json
 
 ###
-POST {{SampleApp_HostAddress}}/acme/fraud-check
-Content-Type: application/json
+
+GET {{SampleApp_HostAddress}}/acme/
 Accept: application/json
 
+###
+
+GET {{SampleApp_HostAddress}}/contoso/
+Accept: application/json
+
+###
+
+GET {{SampleApp_HostAddress}}/posts
+Accept: application/json
+
+###
+
+GET {{SampleApp_HostAddress}}/acme/posts
+Accept: application/json
+
+###
+
+POST {{SampleApp_HostAddress}}/contoso/posts
+Content-Type: application/json
+
 {
-  "transactionAmount": 1000,
-  "customerId": "12345",
-  "metadata": {}
+  "title": "New Post",
+  "body": "Hello from Contoso",
+  "author": "Admin"
 }
+
+###
+
+GET {{SampleApp_HostAddress}}/acme/posts/1/comments
+Accept: application/json
+
+###
+
+POST {{SampleApp_HostAddress}}/acme/posts/1/comments
+Content-Type: application/json
+
+{
+  "author": "Reader",
+  "body": "Great post!"
+}
+
+###
+
+GET {{SampleApp_HostAddress}}/contoso/analytics
+Accept: application/json
 
 ###

@@ -1,22 +1,10 @@
 namespace CShells.Workbench.Features.Core;
-
 /// <summary>
-/// Provides information about the current tenant.
+/// Provides information about the current tenant (shell).
 /// </summary>
 public interface ITenantInfo
 {
-    /// <summary>
-    /// Gets the tenant identifier.
-    /// </summary>
     string TenantId { get; }
-
-    /// <summary>
-    /// Gets the tenant's display name.
-    /// </summary>
     string TenantName { get; }
-
-    /// <summary>
-    /// Gets the tenant's subscription tier.
-    /// </summary>
-    string Tier { get; }
+    string Plan { get; }
 }

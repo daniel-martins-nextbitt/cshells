@@ -1,223 +1,105 @@
-# CShells Workbench - Multi-Tenant Payment Platform
+# CShells Workbench — Multi-Tenant Blog Platform
 
-This sample application demonstrates CShells' multi-tenancy capabilities through a realistic payment processing SaaS platform scenario. It showcases how to build a modular, feature-driven application where different tenants get different service implementations and features based on their subscription tier.
+This sample application demonstrates CShells' multi-tenancy capabilities through a blog platform where different tenants receive different features depending on their plan.
 
 ## Scenario
 
-The sample implements a payment processing platform where different tenants (customers) have access to different features and service implementations based on their subscription tier.
+Three tenants share a single application, each with an escalating set of features:
 
 ### Tenants
 
-#### 1. Default (Basic Tier) - `/`
-- **Payment Processor**: Stripe
-- **Notifications**: Email
-- **Features**: Core, StripePayment, EmailNotification
-
-#### 2. Acme Corp (Premium Tier) - `/acme/*`
-- **Payment Processor**: PayPal
-- **Notifications**: SMS
-- **Premium Feature**: Fraud Detection
-- **Features**: Core, PayPalPayment, SmsNotification, FraudDetection
-
-#### 3. Contoso Ltd (Enterprise Tier) - `/contoso/*`
-- **Payment Processor**: Stripe
-- **Notifications**: Email + SMS (Multi-channel)
-- **Premium Features**: Fraud Detection, Reporting
-- **Features**: Core, StripePayment, MultiChannelNotification, FraudDetection, Reporting
+| Shell | Path | Plan | Features |
+|-------|------|------|----------|
+| **Default** | `/` | Free | Core, Posts |
+| **Acme** | `/acme` | Pro | Core, Posts, Comments |
+| **Contoso** | `/contoso` | Enterprise | Core, Posts, Comments, Analytics |
 
 ## Key Concepts Demonstrated
 
-### 1. **Feature-Based Architecture**
-Each feature is self-contained with its own services and can be composed into different shells:
-- `Core` - Shared services (audit logging, tenant info)
-- `PaymentProcessing` - Interface with Stripe/PayPal implementations
-- `Notifications` - Interface with Email/SMS implementations
-- `FraudDetection` - Premium feature for risk analysis
-- `Reporting` - Enterprise feature with endpoint exposure
+### 1. Feature-Based Architecture
 
-### 2. **Multi-Tenant Service Resolution**
-Different tenants get different implementations of the same service interface:
-- Default and Contoso use `StripePaymentProcessor`
-- Acme uses `PayPalPaymentProcessor`
-- Default uses `EmailNotificationService`
-- Acme uses `SmsNotificationService`
-- Contoso uses both (multi-channel)
+Each feature is a self-contained module with its own services and endpoints:
 
-### 3. **Tier-Based Feature Access**
-Premium features are only available to certain tenants:
-- Basic tier: Core payment and notification services
-- Premium tier: Adds fraud detection
-- Enterprise tier: Adds reporting with custom endpoints
+- **Core** — Tenant identity + `GET /` info endpoint (always enabled)
+- **Posts** — Blog post CRUD (`GET /posts`, `GET /posts/{id}`, `POST /posts`)
+- **Comments** — Reader comments (`GET /posts/{id}/comments`, `POST /posts/{id}/comments`)
+- **Analytics** — Post view-count analytics (`GET /analytics`)
 
-### 4. **Feature-Owned Endpoints**
-All endpoints are exposed by features via `IWebShellFeature`, demonstrating true modularity:
-- `CoreFeature` - Exposes `/` (tenant info)
-- `PaymentProcessingFeatureBase` - Exposes `/payments` (inherited by Stripe/PayPal features)
-- `NotificationFeatureBase` - Exposes `/notifications` (inherited by Email/SMS features)
-- `FraudDetectionFeature` - Exposes `/fraud-check` (premium only)
-- `ReportingFeature` - Exposes `/reports` (enterprise only)
+### 2. Per-Shell Feature Isolation
 
-**Program.cs is now ultra-clean** - it only contains shell configuration, no business logic!
+Every shell gets its own DI container, so in-memory data stores are completely isolated between tenants. Posts created in the Default shell are invisible to Acme.
 
-## API Endpoints
+### 3. Feature Dependencies
 
-### All Tenants
+Features declare dependencies via `[ShellFeature(DependsOn = [...])]`:
 
-**GET /** - Get tenant information
-```bash
-curl http://localhost:5000/
-curl http://localhost:5000/acme
-curl http://localhost:5000/contoso
+```
+Core ← Posts ← Comments
+              ← Analytics
 ```
 
-**POST /payments** - Process a payment
-```bash
-curl -X POST http://localhost:5000/payments \
-  -H "Content-Type: application/json" \
-  -d '{"amount": 100, "currency": "USD", "customerEmail": "customer@example.com"}'
+### 4. Per-Shell Feature Configuration
 
-curl -X POST http://localhost:5000/acme/payments \
-  -H "Content-Type: application/json" \
-  -d '{"amount": 100, "currency": "USD", "customerEmail": "customer@example.com"}'
-```
+The Analytics feature demonstrates `IConfigurableFeature<AnalyticsOptions>` with per-shell settings defined inline in `appsettings.json`:
 
-**POST /notifications** - Send notifications
-```bash
-curl -X POST http://localhost:5000/notifications \
-  -H "Content-Type: application/json" \
-  -d '{"recipient": "user@example.com", "message": "Your payment was successful"}'
-```
-
-### Premium/Enterprise Only
-
-**POST /fraud-check** - Analyze transaction for fraud (Acme, Contoso only)
-```bash
-curl -X POST http://localhost:5000/acme/fraud-check \
-  -H "Content-Type: application/json" \
-  -d '{"amount": 15000, "currency": "USD", "ipAddress": "203.0.113.42"}'
-```
-
-### Enterprise Only
-
-**GET /reports** - Generate transaction report (Contoso only)
-```bash
-curl "http://localhost:5000/contoso/reports?startDate=2024-01-01&endDate=2024-12-31"
-```
-
-## Shell Configuration
-
-Each tenant is configured as a shell via JSON files in the `Shells` folder. CShells loads these at startup using FluentStorage:
-
-- `Shells/Default.json` - Basic tier configuration
-- `Shells/Acme.json` - Premium tier configuration
-- `Shells/Contoso.json` - Enterprise tier configuration
-
-Example shell configuration (Acme.json):
 ```json
-{
-  "name": "Acme",
-  "features": ["Core", "PayPalPayment", "SmsNotification", "FraudDetection"],
-  "properties": {
-    "CShells.AspNetCore.Path": "acme"
-  }
-}
+{ "Name": "Analytics", "TopPostsCount": 10 }
 ```
 
-The `CShells.AspNetCore.Path` property determines the URL path prefix for the shell.
+### 5. Background Work with Shell Scopes
 
-## Project Structure
+`ShellDemoWorker` demonstrates running background tasks within each shell's service scope using `IShellHost` and `IShellContextScopeFactory`.
 
-This sample demonstrates the **recommended approach** for organizing CShells applications with separate feature libraries:
-
-```
-samples/
-├── CShells.Workbench/                       # Main ASP.NET Core application
-│   ├── CShells.Workbench.csproj             # References: CShells, CShells.AspNetCore, CShells.Workbench.Features
-│   ├── Program.cs                           # Ultra-clean - only shell configuration
-│   ├── Shells/                              # Shell configuration files
-│   │   ├── Default.json
-│   │   ├── Acme.json
-│   │   └── Contoso.json
-│   └── Features/                            # Additional features defined in main project
-│       ├── PaymentProcessing/
-│       ├── Notifications/
-│       ├── FraudDetection/
-│       └── Reporting/
-└── CShells.Workbench.Features/              # Feature library (separate project)
-    ├── CShells.Workbench.Features.csproj    # References: CShells.AspNetCore.Abstractions only
-    └── Core/                                # Shared services & tenant info endpoint
-        ├── CoreFeature.cs                   # IWebShellFeature - exposes / endpoint
-        ├── ITenantInfo.cs                   # Tenant information interface
-        ├── IAuditLogger.cs                  # Audit logging interface
-        └── ITimeService.cs                  # Time service interface
-```
-
-### Key Architecture Points
-
-**CShells.Workbench.Features** - The feature library:
-- References **only** `CShells.AspNetCore.Abstractions` (lightweight, no implementation dependencies)
-- Contains the `CoreFeature` that all shells depend on
-- Demonstrates how to build reusable features that can be shared across projects
-- Shows the recommended pattern: feature definitions in a separate class library
-
-**CShells.Workbench** - The main application:
-- References the full `CShells` and `CShells.AspNetCore` packages
-- References the `CShells.Workbench.Features` library
-- Contains additional features for demonstration purposes (in the Features/ folder)
-- Ultra-clean `Program.cs` with only shell configuration
-
-This separation allows you to:
-- Build feature libraries with minimal dependencies
-- Share features across multiple applications
-- Keep feature code independent of framework implementation details
-- Maintain clean boundaries between abstractions and implementations
-```
-
-## Program.cs Configuration
-
-The application uses the simplified `AddShells()` API, which reads from `appsettings.json` by default:
-
-```csharp
-var builder = WebApplication.CreateBuilder(args);
-builder.AddShells(); // Reads from appsettings.json "CShells" section
-
-var app = builder.Build();
-app.MapShells(); // Configures middleware and endpoints
-app.Run();
-```
-
-To use FluentStorage instead (reading from Shells folder), you would use:
-
-```csharp
-var shellsPath = Path.Combine(builder.Environment.ContentRootPath, "Shells");
-var blobStorage = StorageFactory.Blobs.DirectoryFiles(shellsPath);
-
-builder.AddShells(cshells =>
-{
-    cshells.WithFluentStorageProvider(blobStorage);
-});
-```
-
-## Running the Sample
+## Running
 
 ```bash
 cd samples/CShells.Workbench
 dotnet run
 ```
 
-Then visit:
-- `https://localhost:5001/swagger` - Swagger UI to explore all endpoints
-- `https://localhost:5001/` - Default tenant
-- `https://localhost:5001/acme` - Acme Corp tenant
-- `https://localhost:5001/contoso` - Contoso Ltd tenant
+## Example Requests
 
-## Learning Points
+```bash
+# Default shell (Free plan) — info
+curl http://localhost:5031/
 
-1. **IWebShellFeature**: Features expose their own endpoints via `MapEndpoints()` - no code in Program.cs
-2. **Multi-tenant service resolution**: Different tenants get different `IPaymentProcessor` implementations
-3. **Feature composition**: Shells are composed of features defined via JSON configuration
-4. **Path-based routing**: `CShells.AspNetCore.Path` property controls URL routing
-5. **Tier-based features**: Premium and Enterprise features are only enabled for specific tenants
-6. **Endpoint inheritance**: Base feature classes expose endpoints, concrete features register services
-7. **Clean Program.cs**: All business logic lives in features, Program.cs is minimal
-8. **Graceful degradation**: Optional dependencies via `GetService()` (e.g., fraud detection in payments)
+# Acme shell (Pro plan) — info
+curl http://localhost:5031/acme/
+
+# Contoso shell (Enterprise plan) — info
+curl http://localhost:5031/contoso/
+
+# List posts (Default shell)
+curl http://localhost:5031/posts
+
+# List posts (Acme shell — isolated data)
+curl http://localhost:5031/acme/posts
+
+# Create a post (Contoso shell)
+curl -X POST http://localhost:5031/contoso/posts \
+  -H "Content-Type: application/json" \
+  -d '{"title":"New Post","body":"Hello from Contoso","author":"Admin"}'
+
+# Comments — only available on Pro / Enterprise
+curl http://localhost:5031/acme/posts/1/comments
+
+# Analytics — only available on Enterprise
+curl http://localhost:5031/contoso/analytics
+```
+
+## Project Structure
+
+```
+CShells.Workbench/
+├── Program.cs                 ← Host setup
+├── appsettings.json           ← Shell definitions (3 tenants)
+├── Background/
+│   └── ShellDemoWorker.cs     ← Background service per shell
+└── Shells/                    ← (Optional) per-shell JSON files
+
+CShells.Workbench.Features/
+├── Core/                      ← CoreFeature (ITenantInfo, info endpoint)
+├── Posts/                     ← PostsFeature (IPostRepository, CRUD endpoints)
+├── Comments/                  ← CommentsFeature (ICommentRepository, endpoints)
+└── Analytics/                 ← AnalyticsFeature (IAnalyticsService, endpoint)
+```

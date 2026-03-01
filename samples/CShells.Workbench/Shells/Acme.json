@@ -2,14 +2,13 @@
   "name": "Acme",
   "features": [
     "Core",
-    "PayPalPayment",
-    "SmsNotification",
-    { "Name": "FraudDetection", "Threshold": 0.85, "MaxTransactionAmount": 5000 }
+    "Posts",
+    "Comments"
   ],
   "configuration": {
     "WebRouting": {
-      "Path": "acme",
-      "HeaderName": "X-Tenant-Id"
-    }
+      "Path": "acme"
+    },
+    "Plan": "Pro"
   }
 }

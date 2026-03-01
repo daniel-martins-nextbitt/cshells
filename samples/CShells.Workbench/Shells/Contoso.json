@@ -2,14 +2,14 @@
   "name": "Contoso",
   "features": [
     "Core",
-    "StripePayment",
-    "MultiChannelNotification",
-    { "Name": "FraudDetection", "Threshold": 0.6, "MaxTransactionAmount": 25000 },
-    "Reporting"
+    "Posts",
+    "Comments",
+    { "Name": "Analytics", "TopPostsCount": 10 }
   ],
   "configuration": {
     "WebRouting": {
       "Path": "contoso"
-    }
+    },
+    "Plan": "Enterprise"
   }
 }
