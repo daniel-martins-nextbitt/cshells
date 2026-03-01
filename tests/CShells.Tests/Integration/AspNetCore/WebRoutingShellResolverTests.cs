@@ -2,7 +2,6 @@ using CShells.AspNetCore;
 using CShells.AspNetCore.Resolution;
 using CShells.Configuration;
 using CShells.Resolution;
-using System.Text.Json;
 
 namespace CShells.Tests.Integration.AspNetCore;
 

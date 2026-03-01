@@ -200,8 +200,11 @@ public static class CShellsBuilderExtensions
             // Register the dynamic endpoint data source as a singleton
             builder.Services.TryAddSingleton<DynamicShellEndpointDataSource>();
 
-            // Register the endpoint route builder accessor to capture IEndpointRouteBuilder during MapCShells()
+            // Register the endpoint route builder accessor to capture IEndpointRouteBuilder during MapShells()
             builder.Services.TryAddSingleton<EndpointRouteBuilderAccessor>();
+
+            // Register the application builder accessor to capture IApplicationBuilder during MapShells()
+            builder.Services.TryAddSingleton<ApplicationBuilderAccessor>();
 
             // Register the endpoint registration notification handler
             builder.Services.AddSingleton<INotificationHandler<ShellAdded>, Notifications.ShellEndpointRegistrationHandler>();

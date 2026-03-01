@@ -1,4 +1,3 @@
-using System.Text.Json;
 using CShells.Configuration;
 
 namespace CShells.Tests.Unit;

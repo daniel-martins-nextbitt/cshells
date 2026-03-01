@@ -11,12 +11,13 @@ public static class FeatureDiscovery
     /// Discovers all features from the specified assemblies by scanning for types that implement <see cref="IShellFeature"/> or <see cref="IWebShellFeature"/>.
     /// </summary>
     /// <param name="assemblies">The assemblies to scan for features.</param>
+    /// <param name="onAssemblyLoadError">Optional callback invoked when an assembly fails to load its types.</param>
     /// <returns>A collection of feature descriptors for all valid features found.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="assemblies"/> is null.</exception>
     /// <exception cref="InvalidOperationException">
     /// Thrown when duplicate feature names are found.
     /// </exception>
-    public static IEnumerable<ShellFeatureDescriptor> DiscoverFeatures(IEnumerable<Assembly> assemblies)
+    public static IEnumerable<ShellFeatureDescriptor> DiscoverFeatures(IEnumerable<Assembly> assemblies, Action<Assembly, Exception>? onAssemblyLoadError = null)
     {
         var assembliesList = assemblies.ToList();
         Guard.Against.Null(assembliesList);
@@ -29,7 +30,7 @@ public static class FeatureDiscovery
             if (assembly == null!)
                 continue;
 
-            var featureTypes = GetExportedTypes(assembly)
+            var featureTypes = GetExportedTypes(assembly, onAssemblyLoadError)
                 .Where(type => type is { IsClass: true, IsAbstract: false } && typeof(IShellFeature).IsAssignableFrom(type));
 
             foreach (var type in featureTypes)
@@ -106,13 +107,15 @@ public static class FeatureDiscovery
     private static ShellFeatureDescriptor CreateFeatureDescriptor(Type type, ShellFeatureAttribute? attribute, string featureName)
     {
         // Get explicit dependencies from attribute
-        var explicitDependencies = attribute?.DependsOn ?? [];
+        var explicitDependencies = GetExplicitDependencies(featureName, attribute);
 
         // Get inferred dependencies from IInfersDependenciesFrom<> interface
         var inferredDependencies = GetInferredDependencies(type);
 
         // Combine and deduplicate dependencies
-        var allDependencies = explicitDependencies.Concat(inferredDependencies).Distinct().ToArray();
+        var allDependencies = explicitDependencies.Concat(inferredDependencies)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
 
         var descriptor = new ShellFeatureDescriptor(featureName)
         {
@@ -171,7 +174,7 @@ public static class FeatureDiscovery
         return metadata;
     }
 
-    private static IEnumerable<Type> GetExportedTypes(Assembly assembly)
+    private static IEnumerable<Type> GetExportedTypes(Assembly assembly, Action<Assembly, Exception>? onAssemblyLoadError = null)
     {
         try
         {
@@ -188,5 +191,66 @@ public static class FeatureDiscovery
             // Return the types that were successfully loaded
             return ex.Types.OfType<Type>();
         }
+        catch (TypeLoadException ex)
+        {
+            // A type within the assembly references something that cannot be loaded
+            // (e.g. a version-mismatched dependency). Skip the assembly entirely.
+            onAssemblyLoadError?.Invoke(assembly, ex);
+            return [];
+        }
+        catch (FileNotFoundException ex)
+        {
+            // Assembly has missing dependencies - skip it
+            onAssemblyLoadError?.Invoke(assembly, ex);
+            return [];
+        }
+        catch (FileLoadException ex)
+        {
+            // Assembly cannot be loaded - skip it
+            onAssemblyLoadError?.Invoke(assembly, ex);
+            return [];
+        }
+        catch (BadImageFormatException ex)
+        {
+            // Assembly is not a valid .NET assembly - skip it
+            onAssemblyLoadError?.Invoke(assembly, ex);
+            return [];
+        }
+    }
+
+    private static IEnumerable<string> GetExplicitDependencies(string featureName, ShellFeatureAttribute? attribute)
+    {
+        if (attribute?.DependsOn is not { Length: > 0 } dependencies)
+            return [];
+
+        var results = new List<string>(dependencies.Length);
+        foreach (var dependency in dependencies)
+        {
+            switch (dependency)
+            {
+                case string name when !string.IsNullOrWhiteSpace(name):
+                    results.Add(name);
+                    break;
+                case string:
+                    throw new InvalidOperationException($"Feature '{featureName}' has an empty dependency name.");
+                case Type dependencyType:
+                    if (!typeof(IShellFeature).IsAssignableFrom(dependencyType))
+                    {
+                        throw new InvalidOperationException(
+                            $"Feature '{featureName}' has dependency type '{dependencyType.FullName}' that does not implement {nameof(IShellFeature)}.");
+                    }
+
+                    var resolvedName = GetFeatureName(dependencyType, dependencyType.GetCustomAttribute<ShellFeatureAttribute>());
+                    results.Add(resolvedName);
+                    break;
+                case null:
+                    throw new InvalidOperationException($"Feature '{featureName}' has a null dependency entry.");
+                default:
+                    throw new InvalidOperationException(
+                        $"Feature '{featureName}' has unsupported dependency type '{dependency.GetType().FullName}'. Only string and Type are supported.");
+            }
+        }
+
+        return results;
     }
 }

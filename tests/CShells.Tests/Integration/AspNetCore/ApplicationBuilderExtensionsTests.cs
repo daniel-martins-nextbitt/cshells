@@ -37,6 +37,7 @@ public class ApplicationBuilderExtensionsTests
         services.AddSingleton<IShellHost, EmptyShellHost>();
         services.AddSingleton<EndpointRouteBuilderAccessor>();
         services.AddSingleton<DynamicShellEndpointDataSource>();
+        services.AddSingleton<ApplicationBuilderAccessor>();
         var serviceProvider = services.BuildServiceProvider();
         var app = new TestApplicationBuilder(serviceProvider);
 
