@@ -1,50 +1,209 @@
-# [PROJECT_NAME] Constitution
-<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+<!--
+  Sync Impact Report
+  ===================
+  Version change: 0.0.0 → 1.0.0 (initial ratification)
+  Modified principles: N/A (initial)
+  Added sections:
+    - I. Abstraction-First Architecture
+    - II. Feature Modularity
+    - III. Modern C# Style
+    - IV. Explicit Error Handling
+    - V. Test Coverage
+    - VI. Simplicity & Minimalism
+    - Technology Stack & Constraints
+    - Development Workflow
+  Removed sections: N/A (initial)
+  Templates requiring updates:
+    - .specify/templates/plan-template.md ✅ (uses dynamic Constitution Check)
+    - .specify/templates/spec-template.md ✅ (no principle references)
+    - .specify/templates/tasks-template.md ✅ (no principle references)
+    - .specify/templates/checklist-template.md ✅ (no principle references)
+  Follow-up TODOs: None
+-->
+
+# CShells Constitution
 
 ## Core Principles
 
-### [PRINCIPLE_1_NAME]
-<!-- Example: I. Library-First -->
-[PRINCIPLE_1_DESCRIPTION]
-<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
+### I. Abstraction-First Architecture
 
-### [PRINCIPLE_2_NAME]
-<!-- Example: II. CLI Interface -->
-[PRINCIPLE_2_DESCRIPTION]
-<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
+Every public contract MUST be defined as an interface in a dedicated
+`*.Abstractions` project before implementation. Implementations MUST
+reside in a separate project that references the abstractions.
 
-### [PRINCIPLE_3_NAME]
-<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
-[PRINCIPLE_3_DESCRIPTION]
-<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+- Abstractions projects (`CShells.Abstractions`,
+  `CShells.AspNetCore.Abstractions`) MUST depend only on
+  `Microsoft.Extensions.*` abstractions — never on concrete frameworks.
+- Feature libraries SHOULD reference only abstractions packages, keeping
+  them lightweight and decoupled from the full framework.
+- Each shell MUST have its own isolated DI container. Root-level services
+  are copied into shell containers; features register shell-scoped
+  services via `IShellFeature.ConfigureServices`.
+- Constructor dependencies in features are resolved from the root
+  `IServiceProvider` — features MUST NOT depend on shell-scoped services
+  in their constructors.
 
-### [PRINCIPLE_4_NAME]
-<!-- Example: IV. Integration Testing -->
-[PRINCIPLE_4_DESCRIPTION]
-<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+### II. Feature Modularity
 
-### [PRINCIPLE_5_NAME]
-<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
-[PRINCIPLE_5_DESCRIPTION]
-<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+Functionality MUST be delivered as features that implement
+`IShellFeature` (services only) or `IWebShellFeature` (services +
+endpoints). Features are the unit of composition.
 
-## [SECTION_2_NAME]
-<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
+- Features are discovered via reflection from loaded assemblies.
+  The `[ShellFeature]` attribute is optional — use it only when an
+  explicit name, display name, or dependency declaration is needed.
+- Feature dependencies MUST be declared via the `DependsOn` property
+  (string names or `typeof()` references). The framework resolves
+  dependencies using topological ordering; circular dependencies MUST
+  NOT exist.
+- Features MUST be self-contained: a feature's services, endpoints,
+  and configuration belong to that feature alone. Cross-feature
+  coupling MUST go through shared abstractions or dependency
+  declarations, never direct type references to another feature's
+  internals.
+- Shell configuration MUST be declarative — driven by
+  `appsettings.json`, external JSON files, or the code-first fluent
+  API. Feature sets per shell MUST be expressible as configuration
+  without code changes.
 
-[SECTION_2_CONTENT]
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
+### III. Modern C# Style
 
-## [SECTION_3_NAME]
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
+All code MUST target .NET 10 (C# 14) and use the latest language
+features consistently.
 
-[SECTION_3_CONTENT]
-<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
+- **Nullable reference types**: MUST be enabled (`<Nullable>enable</Nullable>`).
+  Use `?` annotations for genuinely nullable values; non-null is the default.
+- **Implicit usings**: MUST be enabled. Do not add explicit `using`
+  directives for implicitly imported namespaces.
+- **File-scoped namespaces**: MUST be used in every file
+  (`namespace CShells;` not `namespace CShells { }`).
+- **`var`**: MUST be used whenever the type is apparent from context.
+  Explicit types are acceptable only for disambiguation or API clarity.
+- **Primary constructors**: SHOULD be used for DI injection. Guard all
+  injected parameters with `Guard.Against.Null(...)` and assign to
+  private readonly fields.
+- **Expression-bodied members**: MUST be used for single-expression
+  methods and properties.
+- **Collection expressions**: MUST be used for initialization
+  (`= []`, `[..items]`) instead of `new List<T>()` or `Array.Empty<T>()`.
+- **Naming**: PascalCase for public members, types, and namespaces.
+  Private fields use `_camelCase` (underscore prefix). Interfaces use
+  `I` prefix. No other prefixes or Hungarian notation.
+- **Access modifiers**: MUST always be explicit — no implicit `private`.
+- **`internal sealed`**: SHOULD be applied to implementation classes that
+  are not intended for external inheritance.
+
+### IV. Explicit Error Handling
+
+Errors MUST be surfaced clearly. Silent failures are forbidden.
+
+- Guard clauses (`Guard.Against.Null`, `Guard.Against.NullOrWhiteSpace`,
+  `Guard.Against.NullOrEmpty`) MUST be used at public method entry
+  points for parameter validation. Use `[CallerArgumentExpression]` for
+  automatic parameter name propagation.
+- Custom domain exceptions (e.g., `FeatureNotFoundException`,
+  `FeatureConfigurationValidationException`) MUST carry structured
+  context — the feature name, dependent feature name, or error list —
+  to aid debugging.
+- Exception messages MUST include actionable guidance (e.g.,
+  "Did you forget to reference the assembly?").
+- Swallowing exceptions without logging or rethrowing is NOT permitted.
+
+### V. Test Coverage
+
+New functionality MUST be accompanied by tests. The codebase uses xUnit
+exclusively.
+
+- **Framework**: xUnit with `Assert.*` static methods. No third-party
+  assertion libraries.
+- **Organization**: Unit tests in `tests/CShells.Tests/Unit/` mirroring
+  the `src/` structure. Integration tests in
+  `tests/CShells.Tests/Integration/` grouped by subsystem. End-to-end
+  tests in `tests/CShells.Tests.EndToEnd/`.
+- **Naming**: Test methods follow `{Method}_{Scenario}_{ExpectedResult}`.
+  Use `[Fact(DisplayName = "...")]` and
+  `[Theory(DisplayName = "...")]` for readable output.
+- **Parameterization**: Use `[Theory]` with `[InlineData]` or
+  `[MemberData]` for data-driven tests.
+- Tests MUST pass before a PR is merged. The CI pipeline runs
+  `dotnet test` on every push to `main`.
+
+### VI. Simplicity & Minimalism
+
+Complexity MUST be justified. Prefer the simplest design that meets
+current requirements.
+
+- Do not add abstractions, helpers, or layers for hypothetical future
+  needs. Features, services, and types are introduced only when a
+  concrete requirement demands them.
+- Fluent builder APIs (e.g., `CShellsBuilder`, `ShellBuilder`) are the
+  preferred pattern for composable configuration — but MUST NOT be
+  introduced where a simple method call suffices.
+- XML doc comments with `<summary>`, `<param>`, `<returns>`, and
+  `<remarks>` are required on all public API types and members. Use
+  `<remarks>` for architectural constraints that are not obvious from
+  the signature. Do not add comments to non-public or trivial code.
+- Changes MUST be focused and minimal. A bug fix does not include
+  surrounding refactors. A feature does not include speculative
+  extensibility.
+
+## Technology Stack & Constraints
+
+- **Runtime**: .NET 10 (C# 14, `LangVersion` latest). Source projects
+  multi-target `net8.0;net9.0;net10.0`; test and sample projects target
+  `net10.0` only.
+- **Build**: MSBuild with Central Package Management
+  (`Directory.Packages.props`). All package versions are managed
+  centrally — individual `.csproj` files MUST NOT specify versions.
+- **CI/CD**: GitHub Actions (`publish.yml`). Versioning is derived from
+  `src/Directory.Build.props` `<Version>` tag; release builds use the
+  git tag, main-branch pushes produce `-preview.{run}` suffixes.
+- **NuGet**: Eight packages published per release. Each src project
+  includes a per-project `README.md` embedded in the NuGet package.
+- **Testing framework**: xUnit 2.x (`xunit`, `xunit.runner.visualstudio`,
+  `Microsoft.NET.Test.Sdk`, `coverlet.collector`).
+- **Third-party dependencies**: FastEndpoints (adapter), FluentStorage
+  (provider), Swashbuckle (sample). New third-party dependencies MUST
+  be justified and added via `Directory.Packages.props`.
+
+## Development Workflow
+
+- **Branching**: Feature branches off `main`. PRs MUST pass CI
+  (build + test) before merge.
+- **PR scope**: Keep changes focused and minimal. Include tests for new
+  functionality. Update documentation (docs/, wiki/, README) when
+  adding or changing public-facing behavior.
+- **Build commands**:
+  - `dotnet build` — build the solution.
+  - `dotnet test` — run all tests.
+  - `dotnet test tests/CShells.Tests/` — run unit + integration tests.
+  - `cd samples/CShells.Workbench && dotnet run` — run the sample app.
+- **Documentation**: Markdown docs live in `docs/` and `wiki/`.
+  Per-project READMEs in each `src/` project. The root `README.md` is
+  the primary entry point for users.
+- **Code review**: All PRs MUST verify compliance with this
+  constitution. Complexity additions MUST be justified in the PR
+  description.
 
 ## Governance
-<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
 
-[GOVERNANCE_RULES]
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
+This constitution is the authoritative reference for CShells coding
+standards, architecture decisions, and development practices. It
+supersedes ad-hoc conventions or undocumented habits.
 
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
-<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+- **Amendments**: Any change to this constitution MUST be documented
+  with a version bump, rationale, and sync impact report (prepended as
+  an HTML comment). Use semantic versioning: MAJOR for principle
+  removals/redefinitions, MINOR for new principles or material
+  expansions, PATCH for clarifications and wording fixes.
+- **Compliance**: All PRs and code reviews MUST verify adherence to the
+  principles above. Violations MUST be flagged and resolved before
+  merge.
+- **Runtime guidance**: `.github/copilot-instructions.md` provides
+  AI-assistant-specific guidance and MUST remain consistent with this
+  constitution. Update it when principles change.
+- **Conflict resolution**: If a principle conflicts with a practical
+  requirement, document the deviation in the PR with a justification.
+  Recurring deviations signal that the constitution needs amendment.
+
+**Version**: 1.0.0 | **Ratified**: 2026-03-08 | **Last Amended**: 2026-03-08
