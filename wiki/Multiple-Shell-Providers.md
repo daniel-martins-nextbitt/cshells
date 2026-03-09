@@ -171,7 +171,7 @@ cshells.WithProvider(mutableProvider);
 
 ## Targeted Provider Lookup
 
-Providers implement `GetShellSettingsAsync(ShellId)` for efficient single-shell lookup during `ReloadShellAsync`. Built-in providers optimize this (e.g., `MutableInMemoryShellSettingsProvider` uses O(1) dictionary lookup). Custom providers can override this method; the default implementation enumerates all shells and filters by ID.
+Providers implement `GetShellSettingsAsync(ShellId)` for efficient single-shell lookup during `ReloadShellAsync`. Built-in providers optimize this (e.g., `MutableInMemoryShellSettingsProvider` uses O(1) dictionary lookup). Custom providers must implement both overloads of `GetShellSettingsAsync`; a simple approach is to enumerate all shells and filter by ID.
 
 With a `CompositeShellSettingsProvider`, all providers are queried for the targeted shell ID, and the last non-null result wins — matching the same last-wins semantics used during full enumeration.
 
