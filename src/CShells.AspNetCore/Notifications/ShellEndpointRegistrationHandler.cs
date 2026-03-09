@@ -18,6 +18,7 @@ namespace CShells.AspNetCore.Notifications;
 public class ShellEndpointRegistrationHandler :
     INotificationHandler<ShellAdded>,
     INotificationHandler<ShellRemoved>,
+    INotificationHandler<ShellReloaded>,
     INotificationHandler<ShellsReloaded>
 {
     private readonly DynamicShellEndpointDataSource _endpointDataSource;
@@ -69,6 +70,41 @@ public class ShellEndpointRegistrationHandler :
     {
         _logger.LogInformation("Removing endpoints for shell '{ShellId}'", notification.ShellId);
         _endpointDataSource.RemoveEndpoints(notification.ShellId);
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public Task HandleAsync(ShellReloaded notification, CancellationToken cancellationToken = default)
+    {
+        // Only handle per-shell reload notifications (non-null ShellId).
+        // Aggregate (null ShellId) reloads are handled by ShellsReloaded.
+        if (notification.ShellId is not { } shellId)
+            return Task.CompletedTask;
+
+        if (_endpointRouteBuilderAccessor.EndpointRouteBuilder == null)
+        {
+            _logger.LogWarning("Cannot re-register endpoints for shell '{ShellId}': IEndpointRouteBuilder not available.", shellId);
+            return Task.CompletedTask;
+        }
+
+        _logger.LogInformation("Re-registering endpoints for reloaded shell '{ShellId}'", shellId);
+
+        // Remove stale endpoints for the reloaded shell
+        _endpointDataSource.RemoveEndpoints(shellId);
+
+        // Re-register endpoints from the refreshed shell context.
+        // The shell may have been removed during a full reload; in that case
+        // we only need to remove the endpoints (already done above).
+        try
+        {
+            var shellContext = _shellHost.GetShell(shellId);
+            RegisterShellEndpoints(shellContext.Settings);
+        }
+        catch (KeyNotFoundException)
+        {
+            _logger.LogDebug("Shell '{ShellId}' no longer exists after reload; endpoints removed", shellId);
+        }
+
         return Task.CompletedTask;
     }
 

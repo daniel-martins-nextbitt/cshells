@@ -134,8 +134,21 @@ public class DefaultShellManager : IShellManager
 
         lock (_lock)
         {
-            // Update cache: replace the targeted shell, preserve all others
-            _cache.Load(_cache.GetAll().Where(s => !s.Id.Equals(shellId)).Append(freshSettings));
+            // Replace the targeted shell in-place to preserve insertion order;
+            // only append when the shell is genuinely new.
+            var existing = _cache.GetAll().ToList();
+            var index = existing.FindIndex(s => s.Id.Equals(shellId));
+
+            if (index >= 0)
+            {
+                existing[index] = freshSettings;
+            }
+            else
+            {
+                existing.Add(freshSettings);
+            }
+
+            _cache.Load(existing);
         }
 
         // Invalidate the cached runtime context so next access rebuilds
@@ -163,16 +176,12 @@ public class DefaultShellManager : IShellManager
         var settings = await _provider.GetShellSettingsAsync(cancellationToken);
         var settingsList = settings.ToList();
 
-        // Capture current shell IDs before updating cache for reconciliation
+        // Capture current shells before updating cache for reconciliation
         IReadOnlyCollection<ShellSettings> previousShells;
 
         lock (_lock)
         {
             previousShells = _cache.GetAll();
-
-            // Update cache - reconciles to provider state
-            _cache.Clear();
-            _cache.Load(settingsList);
         }
 
         // Determine changed shells (added, removed, or updated)
@@ -183,13 +192,34 @@ public class DefaultShellManager : IShellManager
         var removedIds = previousIds.Except(currentIds);
         var potentiallyUpdatedIds = currentIds.Intersect(previousIds);
 
-        // For "updated", compare settings objects by reference to detect changes
-        var previousByKey = previousShells.ToDictionary(s => s.Id);
-        var currentByKey = settingsList.ToDictionary(s => s.Id);
+        // Build lookup dictionaries using last-wins to handle duplicate IDs consistently
+        // with ShellSettingsCache.Load() which also uses last-wins semantics.
+        var previousByKey = new Dictionary<ShellId, ShellSettings>();
+        foreach (var s in previousShells)
+            previousByKey[s.Id] = s;
+
+        var currentByKey = new Dictionary<ShellId, ShellSettings>();
+        foreach (var s in settingsList)
+            currentByKey[s.Id] = s;
+
+        // For "updated", compare settings structurally to detect meaningful changes
         var updatedIds = potentiallyUpdatedIds.Where(id =>
-            !ReferenceEquals(previousByKey[id], currentByKey[id]));
+            !ShellSettingsEqual(previousByKey[id], currentByKey[id]));
 
         var changedShells = addedIds.Concat(removedIds).Concat(updatedIds).ToList();
+
+        // Emit per-shell ShellReloading for each changed shell (before mutation)
+        foreach (var id in changedShells)
+        {
+            await _notificationPublisher.PublishAsync(new ShellReloading(id), strategy: null, cancellationToken);
+        }
+
+        // Update cache - reconciles to provider state
+        lock (_lock)
+        {
+            _cache.Clear();
+            _cache.Load(settingsList);
+        }
 
         // Invalidate all cached runtime contexts so next access rebuilds from fresh settings
         if (_shellHost is DefaultShellHost defaultHost)
@@ -199,11 +229,45 @@ public class DefaultShellManager : IShellManager
 
         _logger.LogInformation("Reloaded {Count} shell(s)", settingsList.Count);
 
+        // Emit per-shell ShellReloaded for each changed shell (after mutation)
+        foreach (var id in changedShells)
+        {
+            await _notificationPublisher.PublishAsync(
+                new ShellReloaded(id, [id]), strategy: null, cancellationToken);
+        }
+
         // Publish ShellsReloaded (existing aggregate notification, preserved)
         await _notificationPublisher.PublishAsync(new ShellsReloaded(settingsList), strategy: null, cancellationToken);
 
         // Publish aggregate ShellReloaded last (null ShellId, with all changed shells)
         await _notificationPublisher.PublishAsync(
             new ShellReloaded(null, changedShells.AsReadOnly()), strategy: null, cancellationToken);
+    }
+
+    /// <summary>
+    /// Compares two <see cref="ShellSettings"/> by value (Id, EnabledFeatures, ConfigurationData)
+    /// to determine whether they represent the same logical configuration.
+    /// </summary>
+    private static bool ShellSettingsEqual(ShellSettings a, ShellSettings b)
+    {
+        if (!a.Id.Equals(b.Id))
+            return false;
+
+        if (!a.EnabledFeatures.SequenceEqual(b.EnabledFeatures, StringComparer.OrdinalIgnoreCase))
+            return false;
+
+        if (a.ConfigurationData.Count != b.ConfigurationData.Count)
+            return false;
+
+        foreach (var kvp in a.ConfigurationData)
+        {
+            if (!b.ConfigurationData.TryGetValue(kvp.Key, out var otherValue))
+                return false;
+
+            if (!Equals(kvp.Value, otherValue))
+                return false;
+        }
+
+        return true;
     }
 }

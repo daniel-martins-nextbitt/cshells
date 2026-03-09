@@ -119,7 +119,7 @@ public class DatabaseShellSettingsProvider(MyDbContext db) : IShellSettingsProvi
     public async Task<ShellSettings?> GetShellSettingsAsync(
         ShellId shellId, CancellationToken ct = default)
     {
-        var tenant = await db.Tenants.FindAsync([shellId.Value], ct);
+        var tenant = await db.Tenants.FindAsync([shellId.Name], ct);
         if (tenant is null || !tenant.IsActive) return null;
 
         return new ShellSettings(
@@ -129,7 +129,7 @@ public class DatabaseShellSettingsProvider(MyDbContext db) : IShellSettingsProvi
 }
 ```
 
-The `GetShellSettingsAsync(ShellId)` overload enables targeted reload via `IShellManager.ReloadShellAsync`. If a provider does not override this method, the default implementation enumerates all shells and filters by ID.
+The `GetShellSettingsAsync(ShellId)` overload enables targeted reload via `IShellManager.ReloadShellAsync`. Providers must implement both overloads; a simple approach is to enumerate all shells and filter by ID.
 
 Register it:
 

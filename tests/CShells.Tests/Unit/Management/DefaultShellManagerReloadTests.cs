@@ -328,14 +328,15 @@ public class DefaultShellManagerReloadTests
     [Fact(DisplayName = "ReloadAllShellsAsync emits aggregate ShellReloading and ShellReloaded")]
     public async Task ReloadAllShellsAsync_EmitsAggregateNotifications()
     {
-        // Arrange
-        var settings = CreateShell("Tenant1", ["FeatureA"]);
+        // Arrange - use different settings instances so structural comparison detects a change
+        var original = CreateShell("Tenant1", ["FeatureA"]);
+        var updated = CreateShell("Tenant1", ["FeatureA", "FeatureB"]);
 
         var provider = new StubShellSettingsProvider();
-        provider.SetShell(new("Tenant1"), settings);
+        provider.SetShell(new("Tenant1"), updated);
 
         var cache = new ShellSettingsCache();
-        cache.Load([settings]);
+        cache.Load([original]);
 
         var notifications = new RecordingNotificationPublisher();
         var manager = CreateManager(cache, provider, notifications);
@@ -405,6 +406,125 @@ public class DefaultShellManagerReloadTests
             .Where(n => n is ShellReloading or ShellReloaded)
             .ToList();
         Assert.Equal(2, reloadNotifications.Count); // exactly one ShellReloading + one ShellReloaded
+    }
+
+    [Fact(DisplayName = "ReloadAllShellsAsync emits per-shell notifications for changed shells")]
+    public async Task ReloadAllShellsAsync_EmitsPerShellNotifications()
+    {
+        // Arrange
+        var tenant1Original = CreateShell("Tenant1", ["FeatureA"]);
+        var tenant1Updated = CreateShell("Tenant1", ["FeatureA", "FeatureB"]);
+        var newTenant = CreateShell("NewTenant", ["FeatureX"]);
+
+        var provider = new StubShellSettingsProvider();
+        provider.SetShell(new("Tenant1"), tenant1Updated);
+        provider.SetShell(new("NewTenant"), newTenant);
+
+        var cache = new ShellSettingsCache();
+        cache.Load([tenant1Original]);
+
+        var notifications = new RecordingNotificationPublisher();
+        var manager = CreateManager(cache, provider, notifications);
+
+        // Act
+        await manager.ReloadAllShellsAsync();
+
+        // Assert - per-shell notifications for each changed shell
+        var perShellReloading = notifications.Notifications.OfType<ShellReloading>()
+            .Where(n => n.ShellId is not null).ToList();
+        var perShellReloaded = notifications.Notifications.OfType<ShellReloaded>()
+            .Where(n => n.ShellId is not null).ToList();
+
+        Assert.Equal(2, perShellReloading.Count); // Tenant1 (updated) + NewTenant (added)
+        Assert.Equal(2, perShellReloaded.Count);
+    }
+
+    [Fact(DisplayName = "ReloadAllShellsAsync per-shell notifications ordered before ShellsReloaded")]
+    public async Task ReloadAllShellsAsync_PerShellNotifications_BeforeShellsReloaded()
+    {
+        // Arrange
+        var original = CreateShell("Tenant1", ["FeatureA"]);
+        var updated = CreateShell("Tenant1", ["FeatureA", "FeatureB"]);
+
+        var provider = new StubShellSettingsProvider();
+        provider.SetShell(new("Tenant1"), updated);
+
+        var cache = new ShellSettingsCache();
+        cache.Load([original]);
+
+        var notifications = new RecordingNotificationPublisher();
+        var manager = CreateManager(cache, provider, notifications);
+
+        // Act
+        await manager.ReloadAllShellsAsync();
+
+        // Assert - ordering: per-shell ShellReloaded before ShellsReloaded before aggregate ShellReloaded
+        var all = notifications.Notifications.ToList();
+        var perShellReloaded = all.OfType<ShellReloaded>().First(n => n.ShellId is not null);
+        var shellsReloaded = all.OfType<ShellsReloaded>().Single();
+        var aggregateReloaded = all.OfType<ShellReloaded>().Single(n => n.ShellId is null);
+
+        Assert.True(all.IndexOf(perShellReloaded) < all.IndexOf(shellsReloaded),
+            "Per-shell ShellReloaded must be emitted before ShellsReloaded");
+        Assert.True(all.IndexOf(shellsReloaded) < all.IndexOf(aggregateReloaded),
+            "ShellsReloaded must be emitted before the aggregate ShellReloaded");
+    }
+
+    [Fact(DisplayName = "ReloadAllShellsAsync does not report unchanged shells in ChangedShells")]
+    public async Task ReloadAllShellsAsync_UnchangedShells_NotInChangedShells()
+    {
+        // Arrange - use the same settings instance for unchanged shell
+        var unchanged = CreateShell("Tenant1", ["FeatureA"]);
+        var updated = CreateShell("Tenant2", ["FeatureB", "FeatureC"]);
+
+        var provider = new StubShellSettingsProvider();
+        // Provider returns structurally identical settings for Tenant1
+        provider.SetShell(new("Tenant1"), CreateShell("Tenant1", ["FeatureA"]));
+        provider.SetShell(new("Tenant2"), updated);
+
+        var cache = new ShellSettingsCache();
+        cache.Load([unchanged, CreateShell("Tenant2", ["FeatureB"])]);
+
+        var notifications = new RecordingNotificationPublisher();
+        var manager = CreateManager(cache, provider, notifications);
+
+        // Act
+        await manager.ReloadAllShellsAsync();
+
+        // Assert - only Tenant2 should be in changed shells (Tenant1 is structurally identical)
+        var aggregateReloaded = notifications.Notifications.OfType<ShellReloaded>().Single(n => n.ShellId is null);
+        Assert.DoesNotContain(new ShellId("Tenant1"), aggregateReloaded.ChangedShells);
+        Assert.Contains(new ShellId("Tenant2"), aggregateReloaded.ChangedShells);
+    }
+
+    [Fact(DisplayName = "ReloadShellAsync preserves insertion order of existing shells")]
+    public async Task ReloadShellAsync_PreservesInsertionOrder()
+    {
+        // Arrange
+        var tenant1 = CreateShell("Tenant1", ["FeatureA"]);
+        var tenant2 = CreateShell("Tenant2", ["FeatureB"]);
+        var tenant3 = CreateShell("Tenant3", ["FeatureC"]);
+        var updatedTenant2 = CreateShell("Tenant2", ["FeatureB", "FeatureD"]);
+
+        var provider = new StubShellSettingsProvider();
+        provider.SetShell(new("Tenant2"), updatedTenant2);
+
+        var cache = new ShellSettingsCache();
+        cache.Load([tenant1, tenant2, tenant3]);
+
+        var notifications = new RecordingNotificationPublisher();
+        var manager = CreateManager(cache, provider, notifications);
+
+        // Act
+        await manager.ReloadShellAsync(new ShellId("Tenant2"));
+
+        // Assert - order should be preserved: Tenant1, Tenant2, Tenant3
+        var allShells = cache.GetAll().ToList();
+        Assert.Equal(3, allShells.Count);
+        Assert.Equal(new ShellId("Tenant1"), allShells[0].Id);
+        Assert.Equal(new ShellId("Tenant2"), allShells[1].Id);
+        Assert.Equal(new ShellId("Tenant3"), allShells[2].Id);
+        Assert.Contains("FeatureD", allShells[1].EnabledFeatures);
     }
 
     #endregion
