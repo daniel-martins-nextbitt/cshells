@@ -92,9 +92,18 @@ public class ShellEndpointRegistrationHandler :
         // Remove stale endpoints for the reloaded shell
         _endpointDataSource.RemoveEndpoints(shellId);
 
-        // Re-register endpoints from the refreshed shell context
-        var shellContext = _shellHost.GetShell(shellId);
-        RegisterShellEndpoints(shellContext.Settings);
+        // Re-register endpoints from the refreshed shell context.
+        // The shell may have been removed during a full reload; in that case
+        // we only need to remove the endpoints (already done above).
+        try
+        {
+            var shellContext = _shellHost.GetShell(shellId);
+            RegisterShellEndpoints(shellContext.Settings);
+        }
+        catch (KeyNotFoundException)
+        {
+            _logger.LogDebug("Shell '{ShellId}' no longer exists after reload; endpoints removed", shellId);
+        }
 
         return Task.CompletedTask;
     }
